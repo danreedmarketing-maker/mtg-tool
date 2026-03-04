@@ -172,6 +172,37 @@ const css = `
   .cmp-sc .lbl{font-family:var(--fd);font-size:7px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin-bottom:4px}
   .cmp-sc .val{font-family:var(--fd);font-size:14px;font-weight:600;color:var(--gold2)}
   .cmp-sc .val.grn{color:var(--grn)}.cmp-sc .val.red{color:var(--red)}.cmp-sc .val.teal{color:var(--teal)}
+
+  .dash{padding:0}
+  .kpi-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:9px;margin-bottom:22px}
+  .kpi{background:var(--sur);border:1px solid var(--bdr);border-radius:4px;padding:12px 14px}
+  .kpi.gold{border-top:2px solid var(--gold)}
+  .kpi.teal{border-top:2px solid var(--teal)}
+  .kpi.grn{border-top:2px solid var(--grn)}
+  .kpi.red{border-top:2px solid var(--red)}
+  .kpi-lbl{font-family:var(--fd);font-size:7px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-bottom:5px}
+  .kpi-val{font-family:var(--fd);font-size:17px;font-weight:600;color:var(--gold2)}
+  .kpi-val.teal{color:var(--teal)}.kpi-val.grn{color:var(--grn)}.kpi-val.red{color:var(--red)}.kpi-val.mut{color:var(--mut)}
+  .kpi-sub{font-size:10px;color:var(--mut);margin-top:3px;font-style:italic}
+  .deal-table-wrap{overflow-x:auto;overflow-y:auto;max-height:480px}
+  .deal-row-exp{background:var(--sur2);border-bottom:1px solid var(--bdr)}
+  .deal-row-exp td{padding:0}
+  .snap-list{padding:10px 14px;display:flex;flex-direction:column;gap:6px}
+  .snap-item{display:flex;align-items:center;gap:10px;padding:7px 10px;
+    background:var(--bg);border:1px solid var(--bdr);border-radius:3px}
+  .snap-item-name{flex:1;font-family:var(--fd);font-size:9px;letter-spacing:.08em;color:var(--gold2)}
+  .snap-item-meta{font-size:10px;color:var(--mut)}
+  .inline-edit input,.inline-edit select{background:var(--bg);border:1px solid var(--gold);
+    border-radius:2px;color:var(--gold2);font-family:var(--fb);font-size:12px;padding:2px 6px;outline:none;width:100%}
+  .dash-section{background:var(--sur);border:1px solid var(--bdr);border-radius:4px;overflow:hidden;margin-bottom:16px}
+  .dash-ph{background:var(--sur2);border-bottom:1px solid var(--bdr);padding:9px 15px;
+    display:flex;align-items:center;justify-content:space-between;
+    font-family:var(--fd);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+  .no-deals{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:50px 20px;color:var(--mut)}
+  .no-deals p{font-family:var(--fd);font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin-top:10px}
+  .dash-sync{display:flex;align-items:center;gap:8px;padding:10px 15px;
+    border-top:1px solid var(--bdr);font-size:11px;color:var(--mut);font-style:italic}
   .ebar{padding:10px 15px;border-top:1px solid var(--bdr);background:var(--sur2);display:flex;align-items:center;gap:12px}
   .ebar .st{flex:1;font-size:12px;color:var(--mut);font-style:italic}
   .fbar{padding:8px 14px;border-bottom:1px solid var(--bdr);background:var(--sur2);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -328,7 +359,14 @@ export default function App() {
   const tokenClientRef = useRef(null);
 
   // Deal tracker
-  const [activeTab,   setActiveTab]   = useState("valuation"); // valuation | compare
+  const [activeTab,   setActiveTab]   = useState("valuation"); // valuation | compare | dashboard
+  const [dealLog,     setDealLog]     = useState([]);   // rows from Sheets Deal Log
+  const [snapshots,   setSnapshots]   = useState({});   // { dealName: [tabName, ...] }
+  const [dashLoading, setDashLoading] = useState(false);
+  const [dashMsg,     setDashMsg]     = useState("");
+  const [expandedDeal,setExpandedDeal]= useState(null);
+  const [editingDeal, setEditingDeal] = useState(null); // { rowIdx, field, value }
+  const [allSheetTabs,setAllSheetTabs]= useState([]);
   const [dealName,    setDealName]    = useState("");
   const [dealSeller,  setDealSeller]  = useState("");
   const [dealDate,    setDealDate]    = useState(new Date().toISOString().slice(0,10));
@@ -342,6 +380,10 @@ export default function App() {
   const [cmpDataB,    setCmpDataB]    = useState(null);
   const [cmpDragA,    setCmpDragA]    = useState(false);
   const [cmpDragB,    setCmpDragB]    = useState(false);
+  const [cmpSheetA,   setCmpSheetA]   = useState("");  // selected sheet tab name for slot A
+  const [cmpSheetB,   setCmpSheetB]   = useState("");  // selected sheet tab name for slot B
+  const [cmpLoadingA, setCmpLoadingA] = useState(false);
+  const [cmpLoadingB, setCmpLoadingB] = useState(false);
   const [cmpDiff,     setCmpDiff]     = useState(null);
   const [cmpFilter,   setCmpFilter]   = useState("all");
 
@@ -445,6 +487,34 @@ export default function App() {
     a.href = URL.createObjectURL(new Blob([allRows], {type:"text/csv"}));
     a.download = safeName + "--" + dealStage + "--" + dealDate + ".csv";
     a.click();
+  };
+
+  // -- Parse snapshot from Sheets rows (2D array) ---------------------------
+  const parseSnapshotRows = (rows) => {
+    const meta = {};
+    let dataStart = 0;
+    for(let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if(r[0]?.toLowerCase() === "name") { dataStart = i; break; }
+      if(r[0] && r[1]) meta[r[0].replace(":","").trim().toLowerCase()] = r[1];
+    }
+    const headers = (rows[dataStart]||[]).map(h => h.toLowerCase().trim());
+    const cards = rows.slice(dataStart + 1).filter(r => r[0]).map(r => {
+      const obj = {}; headers.forEach((h,i) => obj[h] = r[i]||"");
+      return {
+        name: obj["name"], set: obj["set"], isFoil: obj["foil"]==="Yes",
+        variant: obj["variant"]||"", qty: parseInt(obj["qty"])||1,
+        condition: obj["cond"]||"NM",
+        low: parseDollar(obj["low"]), mid: parseDollar(obj["mid"]), high: parseDollar(obj["high"]),
+        offerPrice: parseDollar(obj["offer price"]),
+        mktTotal: parseDollar(obj["mkt total"]),
+        tcgFee: parseDollar(obj["tcg fee"]), procFee: parseDollar(obj["proc fee"]),
+        netRevenue: parseDollar(obj["net revenue"]),
+        cogs: parseDollar(obj["cogs/card"]),
+        source: obj["source"]||"csv",
+      };
+    });
+    return { meta, cards };
   };
 
   // -- Parse snapshot CSV (includes metadata header rows) -------------------
@@ -741,13 +811,173 @@ export default function App() {
         );
       }
 
-      setGsMsg("Saved to: " + tabName);
-      // Open the sheet in a new tab
-      window.open("https://docs.google.com/spreadsheets/d/" + sheetId, "_blank");
+      // Always also save local CSV backup
+      exportSnapshot();
+      setGsMsg("Saved to Sheets + CSV downloaded as backup.");
+      // Refresh dashboard deal list
+      if(dealLog.length || gsSheetId) gsLoadDashboard();
     } catch(e) {
       setGsStatus("error");
       setGsMsg("Error: " + e.message);
     }
+  };
+
+  // -- Dashboard: load deal log from Sheets ----------------------------------
+  const gsLoadDashboard = async () => {
+    if(!gsToken || !gsSheetId) return;
+    setDashLoading(true); setDashMsg("Loading...");
+    try {
+      // Get all sheet tab names
+      const meta = await gsRequest("GET",
+        "https://sheets.googleapis.com/v4/spreadsheets/" + gsSheetId + "?fields=sheets.properties"
+      );
+      const tabs = (meta.sheets||[]).map(s => s.properties.title);
+      setAllSheetTabs(tabs);
+
+      // Load Deal Log
+      const logData = await gsRequest("GET",
+        "https://sheets.googleapis.com/v4/spreadsheets/" + gsSheetId +
+        "/values/Deal%20Log!A1:O200"
+      );
+      const rows = logData.values || [];
+      if(rows.length < 2) { setDealLog([]); setDashLoading(false); setDashMsg(""); return; }
+      const headers = rows[0].map(h => h.toLowerCase().trim());
+      const deals = rows.slice(1).filter(r => r[0]).map((r, idx) => {
+        const d = { _rowIdx: idx + 2 };
+        headers.forEach((h, i) => d[h] = r[i] || "");
+        return d;
+      });
+      setDealLog(deals);
+
+      // Build snapshot map: group tabs by deal name
+      const snapMap = {};
+      deals.forEach(d => { snapMap[d["deal name"]] = []; });
+      tabs.forEach(tab => {
+        if(tab === "Deal Log" || tab === "Dashboard") return;
+        // Match tab to deal: tab format is "DealName - Stage - Date"
+        deals.forEach(d => {
+          const safeName = (d["deal name"]||"").replace(/[^a-zA-Z0-9 ]/g,"").slice(0,25).trim();
+          if(tab.startsWith(safeName + " -") || tab.startsWith(d["deal name"] + " -")) {
+            if(!snapMap[d["deal name"]]) snapMap[d["deal name"]] = [];
+            snapMap[d["deal name"]].push(tab);
+          }
+        });
+      });
+      setSnapshots(snapMap);
+      setDashMsg("Last synced: " + new Date().toLocaleTimeString());
+    } catch(e) {
+      setDashMsg("Error loading: " + e.message);
+    }
+    setDashLoading(false);
+  };
+
+  // Auto-load dashboard when tab is opened and connected
+  useEffect(() => {
+    if(activeTab === "dashboard" && gsToken && gsSheetId && !dealLog.length) {
+      gsLoadDashboard();
+    }
+  }, [activeTab, gsToken, gsSheetId]);
+
+  // -- Dashboard: delete a deal -----------------------------------------------
+  const gsDeleteDeal = async (deal) => {
+    if(!window.confirm("Delete deal: " + deal["deal name"] + "? This removes it from the Deal Log but does not delete snapshot tabs.")) return;
+    try {
+      // Clear the row by writing empty values
+      await gsRequest("PUT",
+        "https://sheets.googleapis.com/v4/spreadsheets/" + gsSheetId +
+        "/values/Deal%20Log!A" + deal._rowIdx + ":O" + deal._rowIdx + "?valueInputOption=USER_ENTERED",
+        { values: [Array(15).fill("")] }
+      );
+      setDealLog(prev => prev.filter(d => d._rowIdx !== deal._rowIdx));
+    } catch(e) { setDashMsg("Delete error: " + e.message); }
+  };
+
+  // -- Dashboard: save inline edit --------------------------------------------
+  const gsSaveEdit = async (deal, field, value) => {
+    const fieldColMap = {
+      "deal name": "A", "seller": "B", "date": "C", "stage": "D",
+      "offered ($)": "E", "status": "G", "notes": "N"
+    };
+    const col = fieldColMap[field.toLowerCase()];
+    if(!col) return;
+    try {
+      await gsRequest("PUT",
+        "https://sheets.googleapis.com/v4/spreadsheets/" + gsSheetId +
+        "/values/Deal%20Log!" + col + deal._rowIdx + "?valueInputOption=USER_ENTERED",
+        { values: [[value]] }
+      );
+      setDealLog(prev => prev.map(d => d._rowIdx === deal._rowIdx ? {...d, [field]: value} : d));
+    } catch(e) { setDashMsg("Save error: " + e.message); }
+    setEditingDeal(null);
+  };
+
+  // -- Dashboard: load snapshot into valuation tab ----------------------------
+  const gsLoadSnapshot = async (tabName) => {
+    if(!gsToken || !gsSheetId) return;
+    setDashMsg("Loading snapshot...");
+    try {
+      const data = await gsRequest("GET",
+        "https://sheets.googleapis.com/v4/spreadsheets/" + gsSheetId +
+        "/values/" + encodeURIComponent(tabName) + "!A1:R2000"
+      );
+      const rows = data.values || [];
+      const { meta, cards: parsed } = parseSnapshotRows(rows);
+      if(!parsed.length) { setDashMsg("Could not find card data in snapshot."); return; }
+      // Restore settings
+      if(meta["deal name"]) setDealName(meta["deal name"]);
+      if(meta["seller"])    setDealSeller(meta["seller"]);
+      if(meta["date"])      setDealDate(meta["date"]);
+      if(meta["stage"])     setDealStage(meta["stage"]);
+      if(meta["status"])    setDealStatus(meta["status"]);
+      if(meta["notes"])      setDealNotes(meta["notes"]);
+      if(meta["offer %"])    setDiscount(parseFloat(meta["offer %"])||90);
+      if(meta["condition"])  setCondQuality(meta["condition"]||"NM");
+      if(meta["tcg fee %"])  setTcgFee(parseFloat(meta["tcg fee %"])||10.75);
+      if(meta["proc fee %"]) setProcFee(parseFloat(meta["proc fee %"])||2.5);
+      if(meta["collection cost"]) setCollCost(meta["collection cost"]);
+      setCards(parsed);
+      setFileName(tabName + " (from Sheets)");
+      setStatus("ready");
+      setActiveTab("valuation");
+      setDashMsg("");
+    } catch(e) { setDashMsg("Load error: " + e.message); }
+  };
+
+  // -- Dashboard KPI calculations ---------------------------------------------
+  const dashKPIs = React.useMemo(() => {
+    if(!dealLog.length) return null;
+    const closed = dealLog.filter(d => d["status"]==="Closed");
+    const active = dealLog.filter(d => ["Active","Evaluating","Listed"].includes(d["status"]));
+    const totalInvested = dealLog.reduce((s,d) => s + (parseFloat(d["offered ($)"])||0), 0);
+    const totalNetRev   = closed.reduce((s,d)  => s + (parseDollar(d["actual netrev"])||parseDollar(d["intake netrev"])||0), 0);
+    const totalFees     = dealLog.reduce((s,d)  => s + (parseDollar(d["total fees"])||0), 0);
+    const totalPL       = closed.reduce((s,d)   => s + (parseDollar(d["p&l"])||0), 0);
+    const rois          = closed.map(d => parseFloat(d["roi"])).filter(n => !isNaN(n));
+    const avgROI        = rois.length ? rois.reduce((a,b)=>a+b,0)/rois.length : null;
+    const totalCards    = dealLog.reduce((s,d) => s + (parseInt(d["cards"])||0), 0);
+    const best          = closed.sort((a,b) => (parseDollar(b["p&l"])||0)-(parseDollar(a["p&l"])||0))[0];
+    return { total: dealLog.length, active: active.length, totalInvested, totalNetRev,
+      totalFees, totalPL, avgROI, totalCards, best };
+  }, [dealLog]);
+
+  // -- Load a Sheets snapshot into compare slot -----------------------------
+  const gsLoadSnapshotIntoCompare = async (tabName, slot) => {
+    if(!gsToken || !gsSheetId || !tabName) return;
+    if(slot === "A") setCmpLoadingA(true); else setCmpLoadingB(true);
+    try {
+      const data = await gsRequest("GET",
+        "https://sheets.googleapis.com/v4/spreadsheets/" + gsSheetId +
+        "/values/" + encodeURIComponent(tabName) + "!A1:R2000"
+      );
+      const rows = data.values || [];
+      const parsed = parseSnapshotRows(rows);
+      if(slot === "A") { setCmpFileA(tabName); setCmpDataA(parsed); }
+      else             { setCmpFileB(tabName); setCmpDataB(parsed); }
+    } catch(e) {
+      if(slot === "A") setCmpFileA("Error: " + e.message);
+      else             setCmpFileB("Error: " + e.message);
+    }
+    if(slot === "A") setCmpLoadingA(false); else setCmpLoadingB(false);
   };
 
   const applyMode  = m  => { setPriceMode(m);  if(status==="done") setResults(prev => buildResults(prev, m, tcgFee, procFee, costNum, discount, condQuality, soldPct)); };
@@ -906,7 +1136,7 @@ export default function App() {
 
           {/* Tab bar */}
           <div className="tabs">
-            {[["valuation","Valuation"], ["compare","Compare"]].map(([id,lbl]) => (
+            {[["dashboard","Dashboard"], ["valuation","Valuation"], ["compare","Compare"]].map(([id,lbl]) => (
               <button key={id} className={"tab" + (activeTab===id?" active":"")} onClick={() => setActiveTab(id)}>
                 {lbl}
               </button>
@@ -1335,6 +1565,235 @@ export default function App() {
 
           </> }
 
+          {/* Dashboard tab */}
+          {activeTab === "dashboard" && (
+            <div className="dash">
+              {!gsToken ? (
+                <div className="no-deals">
+                  <div style={{fontSize:32,opacity:.3}}>[ ]</div>
+                  <p>Connect Google Sheets to load dashboard</p>
+                </div>
+              ) : (
+                <>
+                  {/* KPI row */}
+                  <div className="kpi-grid" style={{marginTop:16}}>
+                    <div className="kpi gold">
+                      <div className="kpi-lbl">Total Deals</div>
+                      <div className="kpi-val">{dashKPIs?.total ?? "--"}</div>
+                      <div className="kpi-sub">{dashKPIs ? dashKPIs.active + " active" : ""}</div>
+                    </div>
+                    <div className="kpi gold">
+                      <div className="kpi-lbl">Total Invested</div>
+                      <div className="kpi-val">{dashKPIs ? fmtL(dashKPIs.totalInvested) : "--"}</div>
+                      <div className="kpi-sub">across all deals</div>
+                    </div>
+                    <div className="kpi teal">
+                      <div className="kpi-lbl">Total Net Revenue</div>
+                      <div className="kpi-val teal">{dashKPIs ? fmtL(dashKPIs.totalNetRev) : "--"}</div>
+                      <div className="kpi-sub">closed deals only</div>
+                    </div>
+                    <div className="kpi red">
+                      <div className="kpi-lbl">Total Fees Paid</div>
+                      <div className="kpi-val red">{dashKPIs ? fmtL(dashKPIs.totalFees) : "--"}</div>
+                      <div className="kpi-sub">TCG + processing</div>
+                    </div>
+                    <div className="kpi grn">
+                      <div className="kpi-lbl">Gross P&L</div>
+                      <div className={"kpi-val " + (dashKPIs?.totalPL >= 0 ? "grn" : "red")}>
+                        {dashKPIs ? fmtL(dashKPIs.totalPL) : "--"}
+                      </div>
+                      <div className="kpi-sub">closed deals only</div>
+                    </div>
+                    <div className="kpi teal">
+                      <div className="kpi-lbl">Avg ROI</div>
+                      <div className={"kpi-val " + (dashKPIs?.avgROI >= 0 ? "teal" : "red")}>
+                        {dashKPIs?.avgROI != null ? (dashKPIs.avgROI >= 0 ? "+" : "") + dashKPIs.avgROI.toFixed(1) + "%" : "--"}
+                      </div>
+                      <div className="kpi-sub">closed deals only</div>
+                    </div>
+                    <div className="kpi gold">
+                      <div className="kpi-lbl">Total Cards</div>
+                      <div className="kpi-val mut">{dashKPIs ? dashKPIs.totalCards.toLocaleString() : "--"}</div>
+                      {dashKPIs?.best && <div className="kpi-sub">Best: {dashKPIs.best["deal name"]}</div>}
+                    </div>
+                  </div>
+
+                  {/* Deal list */}
+                  <div className="dash-section">
+                    <div className="dash-ph">
+                      All Deals
+                      <button className="btn sm" style={{margin:0}} onClick={gsLoadDashboard} disabled={dashLoading}>
+                        {dashLoading ? "Syncing..." : "Sync"}
+                      </button>
+                    </div>
+
+                    {!dealLog.length ? (
+                      <div className="no-deals">
+                        <div style={{fontSize:28,opacity:.3}}>[ ]</div>
+                        <p>{dashLoading ? "Loading..." : "No deals yet. Save a snapshot to add a deal."}</p>
+                      </div>
+                    ) : (
+                      <div className="deal-table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th></th>
+                              <th>Deal Name</th>
+                              <th>Seller</th>
+                              <th>Date</th>
+                              <th>Stage</th>
+                              <th>Status</th>
+                              <th className="right">Invested</th>
+                              <th className="right">Cards</th>
+                              <th className="right">Net Rev</th>
+                              <th className="right">Fees</th>
+                              <th className="right">P&L</th>
+                              <th className="right">ROI</th>
+                              <th>Notes</th>
+                              <th></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dealLog.map((deal, i) => {
+                              const isExpanded = expandedDeal === deal._rowIdx;
+                              const snaps = snapshots[deal["deal name"]] || [];
+                              const plVal = parseDollar(deal["p&l"]);
+                              const statusColors = {
+                                Evaluating:"var(--gold2)", Active:"var(--teal)",
+                                Listed:"#aac", Closed:"var(--grn)"
+                              };
+                              return (
+                                <React.Fragment key={deal._rowIdx}>
+                                  <tr style={{background: i%2===0 ? "var(--dark)" : "var(--bg)"}}>
+                                    <td style={{width:28,textAlign:"center"}}>
+                                      <button onClick={() => setExpandedDeal(isExpanded ? null : deal._rowIdx)}
+                                        style={{background:"none",border:"none",color:"var(--gold)",cursor:"pointer",fontSize:14,padding:"0 4px"}}>
+                                        {isExpanded ? "v" : ">"}
+                                      </button>
+                                    </td>
+                                    <td className="nm">
+                                      {editingDeal?.rowIdx===deal._rowIdx && editingDeal?.field==="deal name" ? (
+                                        <div className="inline-edit">
+                                          <input autoFocus defaultValue={deal["deal name"]}
+                                            onBlur={e => gsSaveEdit(deal,"deal name",e.target.value)}
+                                            onKeyDown={e => { if(e.key==="Enter") gsSaveEdit(deal,"deal name",e.target.value); if(e.key==="Escape") setEditingDeal(null); }} />
+                                        </div>
+                                      ) : (
+                                        <span style={{cursor:"pointer"}} onDoubleClick={() => setEditingDeal({rowIdx:deal._rowIdx,field:"deal name"})}>
+                                          {deal["deal name"] || "--"}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td style={{color:"var(--mut)",fontSize:12}}>
+                                      {editingDeal?.rowIdx===deal._rowIdx && editingDeal?.field==="seller" ? (
+                                        <div className="inline-edit">
+                                          <input autoFocus defaultValue={deal["seller"]}
+                                            onBlur={e => gsSaveEdit(deal,"seller",e.target.value)}
+                                            onKeyDown={e => { if(e.key==="Enter") gsSaveEdit(deal,"seller",e.target.value); if(e.key==="Escape") setEditingDeal(null); }} />
+                                        </div>
+                                      ) : (
+                                        <span style={{cursor:"pointer"}} onDoubleClick={() => setEditingDeal({rowIdx:deal._rowIdx,field:"seller"})}>
+                                          {deal["seller"] || "--"}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td style={{color:"var(--mut)",fontSize:12}}>{deal["date"]||"--"}</td>
+                                    <td style={{fontSize:12}}>{deal["stage"]||"--"}</td>
+                                    <td>
+                                      {editingDeal?.rowIdx===deal._rowIdx && editingDeal?.field==="status" ? (
+                                        <div className="inline-edit">
+                                          <select autoFocus defaultValue={deal["status"]}
+                                            onChange={e => gsSaveEdit(deal,"status",e.target.value)}
+                                            onBlur={() => setEditingDeal(null)}>
+                                            {["Evaluating","Active","Listed","Closed"].map(s => <option key={s}>{s}</option>)}
+                                          </select>
+                                        </div>
+                                      ) : (
+                                        <span className="bp" style={{cursor:"pointer",
+                                          color:statusColors[deal["status"]]||"var(--mut)",
+                                          background:"rgba(255,255,255,.04)",border:"1px solid var(--bdr)",
+                                          fontFamily:"var(--fd)",fontSize:8,padding:"2px 6px",borderRadius:2}}
+                                          onDoubleClick={() => setEditingDeal({rowIdx:deal._rowIdx,field:"status"})}>
+                                          {deal["status"]||"--"}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="gd right">{deal["offered ($)"] ? fmtL(parseDollar(deal["offered ($)"])) : "--"}</td>
+                                    <td className="right" style={{color:"var(--mut)"}}>{deal["cards"]||"--"}</td>
+                                    <td className="gr right">{deal["actual netrev"] || deal["intake netrev"] ? fmtL(parseDollar(deal["actual netrev"]||deal["intake netrev"])) : "--"}</td>
+                                    <td className="rd right">{deal["total fees"] ? fmtL(parseDollar(deal["total fees"])) : "--"}</td>
+                                    <td className={"right " + (plVal >= 0 ? "gr" : plVal < 0 ? "rd" : "")}>
+                                      {deal["p&l"] ? fmtL(plVal) : "--"}
+                                    </td>
+                                    <td className={"right " + (parseFloat(deal["roi"]) >= 0 ? "tl" : "rd")} style={{fontSize:11}}>
+                                      {deal["roi"] || "--"}
+                                    </td>
+                                    <td style={{color:"var(--mut)",fontSize:11,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={deal["notes"]}>
+                                      {editingDeal?.rowIdx===deal._rowIdx && editingDeal?.field==="notes" ? (
+                                        <div className="inline-edit">
+                                          <input autoFocus defaultValue={deal["notes"]}
+                                            onBlur={e => gsSaveEdit(deal,"notes",e.target.value)}
+                                            onKeyDown={e => { if(e.key==="Enter") gsSaveEdit(deal,"notes",e.target.value); if(e.key==="Escape") setEditingDeal(null); }} />
+                                        </div>
+                                      ) : (
+                                        <span style={{cursor:"pointer"}} onDoubleClick={() => setEditingDeal({rowIdx:deal._rowIdx,field:"notes"})}>
+                                          {deal["notes"]||"--"}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td style={{textAlign:"center"}}>
+                                      <button onClick={() => gsDeleteDeal(deal)}
+                                        style={{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:13,padding:"0 4px",opacity:.6}}
+                                        title="Delete deal">x</button>
+                                    </td>
+                                  </tr>
+                                  {isExpanded && (
+                                    <tr className="deal-row-exp">
+                                      <td colSpan={14}>
+                                        <div className="snap-list">
+                                          <div style={{fontFamily:"var(--fd)",fontSize:8,letterSpacing:".12em",textTransform:"uppercase",color:"var(--mut)",marginBottom:4}}>
+                                            Snapshots ({snaps.length})
+                                          </div>
+                                          {snaps.length === 0 && (
+                                            <div style={{fontSize:11,color:"var(--mut)",fontStyle:"italic"}}>No snapshots saved yet for this deal.</div>
+                                          )}
+                                          {snaps.map(tab => (
+                                            <div key={tab} className="snap-item">
+                                              <span className="snap-item-name">{tab}</span>
+                                              <button className="btn sm" style={{margin:0,padding:"4px 10px",fontSize:8}}
+                                                onClick={() => gsLoadSnapshot(tab)}>
+                                                Load into Valuation
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    <div className="dash-sync">
+                      <span>{dashMsg || (gsSheetId ? "Connected to Google Sheets" : "Not connected")}</span>
+                      {gsSheetId && (
+                        <a href={"https://docs.google.com/spreadsheets/d/" + gsSheetId} target="_blank" rel="noreferrer"
+                          style={{marginLeft:"auto",fontFamily:"var(--fd)",fontSize:8,color:"var(--teal)",
+                            letterSpacing:".08em",textDecoration:"none",textTransform:"uppercase"}}>
+                          Open Sheet
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+
           {/* Compare mode */}
           {activeTab === "compare" && (
             <div style={{display:"flex",gap:18,alignItems:"flex-start"}}>
@@ -1344,28 +1803,63 @@ export default function App() {
                 <div className="panel">
                   <div className="ph">Load Snapshots</div>
                   <div className="pb">
-                    <div style={{fontFamily:"var(--fd)",fontSize:"8px",letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>Snapshot A (Intake)</div>
+
+                    {/* Slot A */}
+                    <div style={{fontFamily:"var(--fd)",fontSize:"8px",letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6}}>
+                      Snapshot A
+                    </div>
+                    {gsToken && allSheetTabs.filter(t => t!=="Deal Log"&&t!=="Dashboard").length > 0 && (
+                      <div className="deal-field" style={{marginBottom:6}}>
+                        <select value={cmpSheetA} onChange={e => { setCmpSheetA(e.target.value); if(e.target.value) gsLoadSnapshotIntoCompare(e.target.value,"A"); }}>
+                          <option value="">-- Select from Sheets --</option>
+                          {allSheetTabs.filter(t => t!=="Deal Log"&&t!=="Dashboard").map(t => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className={"cmp-drop" + (cmpDragA?" over":"") + (cmpFileA?" loaded":"")}
                       onDragOver={e=>{e.preventDefault();setCmpDragA(true)}}
                       onDragLeave={()=>setCmpDragA(false)}
                       onDrop={e=>{e.preventDefault();setCmpDragA(false);loadCmpFile(e.dataTransfer.files[0],"A")}}>
                       <input type="file" accept=".csv" onChange={e=>loadCmpFile(e.target.files[0],"A")} />
-                      <div style={{fontSize:20,opacity:.4}}>{cmpFileA ? "OK" : "^"}</div>
+                      <div style={{fontSize:16,opacity:.4}}>{cmpLoadingA ? "..." : cmpFileA ? "OK" : "^"}</div>
                       <div style={{fontFamily:"var(--fd)",fontSize:9,color:"var(--mut)"}}>
-                        {cmpFileA || "Drop Intake snapshot CSV"}
+                        {cmpLoadingA ? "Loading from Sheets..." : cmpFileA || "Or drop CSV backup"}
                       </div>
                     </div>
-                    <div style={{fontFamily:"var(--fd)",fontSize:"8px",letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6,marginTop:12}}>Snapshot B (Actual Scan)</div>
+
+                    {/* Slot B */}
+                    <div style={{fontFamily:"var(--fd)",fontSize:"8px",letterSpacing:".1em",textTransform:"uppercase",color:"var(--mut)",marginBottom:6,marginTop:14}}>
+                      Snapshot B
+                    </div>
+                    {gsToken && allSheetTabs.filter(t => t!=="Deal Log"&&t!=="Dashboard").length > 0 && (
+                      <div className="deal-field" style={{marginBottom:6}}>
+                        <select value={cmpSheetB} onChange={e => { setCmpSheetB(e.target.value); if(e.target.value) gsLoadSnapshotIntoCompare(e.target.value,"B"); }}>
+                          <option value="">-- Select from Sheets --</option>
+                          {allSheetTabs.filter(t => t!=="Deal Log"&&t!=="Dashboard").map(t => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className={"cmp-drop" + (cmpDragB?" over":"") + (cmpFileB?" loaded":"")}
                       onDragOver={e=>{e.preventDefault();setCmpDragB(true)}}
                       onDragLeave={()=>setCmpDragB(false)}
                       onDrop={e=>{e.preventDefault();setCmpDragB(false);loadCmpFile(e.dataTransfer.files[0],"B")}}>
                       <input type="file" accept=".csv" onChange={e=>loadCmpFile(e.target.files[0],"B")} />
-                      <div style={{fontSize:20,opacity:.4}}>{cmpFileB ? "OK" : "^"}</div>
+                      <div style={{fontSize:16,opacity:.4}}>{cmpLoadingB ? "..." : cmpFileB ? "OK" : "^"}</div>
                       <div style={{fontFamily:"var(--fd)",fontSize:9,color:"var(--mut)"}}>
-                        {cmpFileB || "Drop Actual Scan snapshot CSV"}
+                        {cmpLoadingB ? "Loading from Sheets..." : cmpFileB || "Or drop CSV backup"}
                       </div>
                     </div>
+
+                    {!gsToken && (
+                      <div style={{fontSize:10,color:"var(--mut)",fontStyle:"italic",marginTop:8,lineHeight:1.5}}>
+                        Connect Google Sheets in the Valuation tab to load snapshots directly. CSV upload always works as backup.
+                      </div>
+                    )}
+
                     <button className="btn" style={{marginTop:12}}
                       disabled={!cmpDataA || !cmpDataB}
                       onClick={() => runCompare(cmpDataA, cmpDataB)}>
