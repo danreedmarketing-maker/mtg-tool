@@ -1,0 +1,16 @@
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d0f14;--sur:#13161e;--sur2:#1a1e2a;--bdr:#2a2f3e;
+    --gold:#c9943a;--gold2:#e8b84b;--teal:#3ab8b8;--red:#c94040;
+    --grn:#3ab87a;--txt:#e2ddd5;--mut:#7a7e8e;
+    --fd:'Cinzel',serif;--fb:'Crimson Pro',Georgia,serif;
+  }
+  body{background:var(--bg);color:var(--txt);font-family:var(--fb)}
+  .app{min-height:100vh;background:var(--bg);
+    background-image:radial-gradient(ellipse 80% 40% at 50% -10%,rgba(201,148,58,.09) 0%,transparent 60%)}
+  .hdr{border-bottom:1px solid var(--bdr);padding:20px 36px 16px;display:flex;align-items:baseline;gap:14px}
+  .hdr h1{font-family:var(--fd);font-size:19px;font-weight:900;letter-spacing:.12em;color:var(--gold2);text-transform:uppercase}
+  .hdr small{font-size:12px;color:var(--mut)}
+  .main{max-width:1480px;margin:0 auto;padding:24px 36px 80px}
+  .sg{display:grid;grid-template-columns:repeat(9,1fr);gap:9px;margin-bottom:22px}
